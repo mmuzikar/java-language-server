@@ -12,6 +12,7 @@ import org.javacs.lsp.DidChangeTextDocumentParams;
 import org.javacs.lsp.DidCloseTextDocumentParams;
 import org.javacs.lsp.DidOpenTextDocumentParams;
 import org.javacs.lsp.TextDocumentContentChangeEvent;
+import org.javacs.lsp.TextDocumentItem;
 
 public class FileStore {
 
@@ -207,14 +208,22 @@ public class FileStore {
     static void open(DidOpenTextDocumentParams params) {
         if (!isJavaFile(params.textDocument.uri)) return;
         var document = params.textDocument;
-        var file = Paths.get(document.uri);
+        final var file = getPath(document.uri);
         activeDocuments.put(file, new VersionedContent(document.text, document.version));
+    }
+
+    public static Path getPath(URI uri) {
+        if (uri.getScheme().equals("jar")) {
+            uri = URI.create(uri.getSchemeSpecificPart());
+        }
+        var file = Paths.get(uri);
+        return file;
     }
 
     static void change(DidChangeTextDocumentParams params) {
         if (!isJavaFile(params.textDocument.uri)) return;
         var document = params.textDocument;
-        var file = Paths.get(document.uri);
+        var file = getPath(document.uri);
         var existing = activeDocuments.get(file);
         if (document.version <= existing.version) {
             LOG.warning("Ignored change with version " + document.version + " <= " + existing.version);
@@ -230,7 +239,7 @@ public class FileStore {
 
     static void close(DidCloseTextDocumentParams params) {
         if (!isJavaFile(params.textDocument.uri)) return;
-        var file = Paths.get(params.textDocument.uri);
+        var file = getPath(params.textDocument.uri);
         activeDocuments.remove(file);
     }
 
@@ -366,7 +375,7 @@ public class FileStore {
     }
 
     static boolean isJavaFile(URI uri) {
-        return uri.getScheme().equals("file") && isJavaFile(Paths.get(uri));
+        return isJavaFile(getPath(uri));
     }
 
     static Optional<Path> findDeclaringFile(TypeElement el) {

@@ -301,7 +301,7 @@ class JavaLanguageServer extends LanguageServer {
     @Override
     public Optional<List<Location>> gotoDefinition(TextDocumentPositionParams position) {
         if (!FileStore.isJavaFile(position.textDocument.uri)) return Optional.empty();
-        var file = Paths.get(position.textDocument.uri);
+        var file = FileStore.getPath(position.textDocument.uri);
         var line = position.position.line + 1;
         var column = position.position.character + 1;
         var found = new DefinitionProvider(compiler(), file, line, column).find();
