@@ -1,5 +1,6 @@
 package org.javacs.completion;
 
+import com.google.gson.JsonArray;
 import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.MemberReferenceTree;
@@ -585,6 +586,9 @@ public class CompletionProvider {
         i.kind = CompletionItemKind.Class;
         i.detail = className;
         var data = new CompletionData();
+        var array = new JsonArray();
+        array.add(className);
+        i.command = new Command("Add Import", "java.addImport", array);
         data.className = className;
         i.data = JsonHelper.GSON.toJsonTree(data);
         return i;

@@ -68,6 +68,7 @@ export async function activate(context: ExtensionContext) {
     commands.registerCommand('java.command.test.run', runTest);
     commands.registerCommand('java.command.test.debug', debugTest);
     commands.registerCommand('java.command.findReferences', runFindReferences);
+    commands.registerCommand('java.addImport', addImport);
 
 	// When the language client activates, register a progress-listener
     client.onReady().then(() => createProgressListeners(client));
@@ -442,6 +443,21 @@ function findJavaExecutableInJavaHome(javaHome: string, binname: string) {
     }
 
     return null;
+}
+
+function addImport(clazz: string) {
+	const editor = window.activeTextEditor
+	const document = editor?.document
+	if (editor && document) {
+		const lines = document.getText().split('\n')
+		const lineNum = lines.findIndex(line => {
+			return /class \w+/g.test(line)
+		})
+
+		editor.edit(builder => {
+			builder.insert(new Position(Math.max(0, lineNum -1), 0), `import ${clazz};\n`)
+		})
+	}
 }
 
 function enableJavadocSymbols() {
