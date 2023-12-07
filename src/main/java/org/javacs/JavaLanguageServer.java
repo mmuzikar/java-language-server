@@ -2,15 +2,6 @@ package org.javacs;
 
 import static org.javacs.JsonHelper.GSON;
 
-import com.google.gson.*;
-import com.sun.source.util.Trees;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.*;
-import java.util.logging.Logger;
-import javax.lang.model.element.*;
 import org.javacs.action.CodeActionProvider;
 import org.javacs.completion.CompletionProvider;
 import org.javacs.completion.SignatureProvider;
@@ -18,12 +9,76 @@ import org.javacs.fold.FoldProvider;
 import org.javacs.hover.HoverProvider;
 import org.javacs.index.SymbolProvider;
 import org.javacs.lens.CodeLensProvider;
-import org.javacs.lsp.*;
+import org.javacs.lsp.CodeAction;
+import org.javacs.lsp.CodeActionParams;
+import org.javacs.lsp.CodeLens;
+import org.javacs.lsp.CodeLensParams;
+import org.javacs.lsp.CompletionItem;
+import org.javacs.lsp.CompletionList;
+import org.javacs.lsp.DidChangeConfigurationParams;
+import org.javacs.lsp.DidChangeTextDocumentParams;
+import org.javacs.lsp.DidChangeWatchedFilesParams;
+import org.javacs.lsp.DidCloseTextDocumentParams;
+import org.javacs.lsp.DidOpenTextDocumentParams;
+import org.javacs.lsp.DidSaveTextDocumentParams;
+import org.javacs.lsp.DocumentFormattingParams;
+import org.javacs.lsp.DocumentSymbolParams;
+import org.javacs.lsp.FileChangeType;
+import org.javacs.lsp.FoldingRange;
+import org.javacs.lsp.FoldingRangeParams;
+import org.javacs.lsp.Hover;
+import org.javacs.lsp.InitializeParams;
+import org.javacs.lsp.InitializeResult;
+import org.javacs.lsp.JavaReportProgressParams;
+import org.javacs.lsp.JavaStartProgressParams;
+import org.javacs.lsp.LanguageClient;
+import org.javacs.lsp.LanguageServer;
+import org.javacs.lsp.Location;
+import org.javacs.lsp.PublishDiagnosticsParams;
+import org.javacs.lsp.ReferenceParams;
+import org.javacs.lsp.RenameParams;
+import org.javacs.lsp.RenameResponse;
+import org.javacs.lsp.SignatureHelp;
+import org.javacs.lsp.SymbolInformation;
+import org.javacs.lsp.TextDocumentPositionParams;
+import org.javacs.lsp.TextEdit;
+import org.javacs.lsp.WorkspaceEdit;
+import org.javacs.lsp.WorkspaceSymbolParams;
 import org.javacs.markup.ColorProvider;
 import org.javacs.markup.ErrorProvider;
 import org.javacs.navigation.DefinitionProvider;
 import org.javacs.navigation.ReferenceProvider;
-import org.javacs.rewrite.*;
+import org.javacs.rewrite.AutoAddOverrides;
+import org.javacs.rewrite.AutoFixImports;
+import org.javacs.rewrite.RenameField;
+import org.javacs.rewrite.RenameMethod;
+import org.javacs.rewrite.RenameVariable;
+import org.javacs.rewrite.Rewrite;
+
+import com.google.gson.JsonArray;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import com.sun.source.util.Trees;
+
+import javax.lang.model.element.Element;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.TypeElement;
+import javax.lang.model.element.VariableElement;
+
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 class JavaLanguageServer extends LanguageServer {
     // TODO allow multiple workspace roots
@@ -55,7 +110,9 @@ class JavaLanguageServer extends LanguageServer {
     }
 
     void lint(Collection<Path> files) {
-        if (files.isEmpty()) return;
+        if (files.isEmpty()) {
+            return;
+        }
         LOG.info("Lint " + files.size() + " files...");
         var started = Instant.now();
         try (var task = compiler().compile(files.toArray(Path[]::new))) {
@@ -114,7 +171,9 @@ class JavaLanguageServer extends LanguageServer {
     }
 
     private Set<String> externalDependencies() {
-        if (!settings.has("externalDependencies")) return Set.of();
+        if (!settings.has("externalDependencies")) {
+            return Set.of();
+        }
         var array = settings.getAsJsonArray("externalDependencies");
         var strings = new HashSet<String>();
         for (var each : array) {
@@ -124,7 +183,9 @@ class JavaLanguageServer extends LanguageServer {
     }
 
     private Set<Path> classPath() {
-        if (!settings.has("classPath")) return Set.of();
+        if (!settings.has("classPath")) {
+            return Set.of();
+        }
         var array = settings.getAsJsonArray("classPath");
         var paths = new HashSet<Path>();
         for (var each : array) {
@@ -134,7 +195,9 @@ class JavaLanguageServer extends LanguageServer {
     }
 
     private Set<Path> docPath() {
-        if (!settings.has("docPath")) return Set.of();
+        if (!settings.has("docPath")) {
+            return Set.of();
+        }
         var array = settings.getAsJsonArray("docPath");
         var paths = new HashSet<Path>();
         for (var each : array) {
@@ -142,8 +205,11 @@ class JavaLanguageServer extends LanguageServer {
         }
         return paths;
     }
+
     private Set<String> addExports() {
-        if (!settings.has("addExports")) return Set.of();
+        if (!settings.has("addExports")) {
+            return Set.of();
+        }
         var array = settings.getAsJsonArray("addExports");
         var strings = new HashSet<String>();
         for (var each : array) {
@@ -210,7 +276,8 @@ class JavaLanguageServer extends LanguageServer {
     }
 
     @Override
-    public void shutdown() {}
+    public void shutdown() {
+    }
 
     public JavaLanguageServer(LanguageClient client) {
         this.client = client;
@@ -231,7 +298,7 @@ class JavaLanguageServer extends LanguageServer {
     @Override
     public void didChangeWatchedFiles(DidChangeWatchedFilesParams params) {
         for (var c : params.changes) {
-            var file = Paths.get(c.uri);
+            var file = FileStore.getPath(c.uri);
             if (FileStore.isJavaFile(file)) {
                 switch (c.type) {
                     case FileChangeType.Created:
@@ -243,6 +310,9 @@ class JavaLanguageServer extends LanguageServer {
                     case FileChangeType.Deleted:
                         FileStore.externalDelete(file);
                         break;
+                }
+                try (var task = compiler().compile(file)) {
+                    //compile latest version
                 }
                 return;
             }
@@ -258,11 +328,15 @@ class JavaLanguageServer extends LanguageServer {
 
     @Override
     public Optional<CompletionList> completion(TextDocumentPositionParams params) {
-        if (!FileStore.isJavaFile(params.textDocument.uri)) return Optional.empty();
-        var file = Paths.get(params.textDocument.uri);
+        if (!FileStore.isJavaFile(params.textDocument.uri)) {
+            return Optional.empty();
+        }
+        var file = FileStore.getPath(params.textDocument.uri);
         var provider = new CompletionProvider(compiler());
         var list = provider.complete(file, params.position.line + 1, params.position.character + 1);
-        if (list == CompletionProvider.NOT_SUPPORTED) return Optional.empty();
+        if (list == CompletionProvider.NOT_SUPPORTED) {
+            return Optional.empty();
+        }
         return Optional.of(list);
     }
 
@@ -277,8 +351,10 @@ class JavaLanguageServer extends LanguageServer {
         var uri = position.textDocument.uri;
         var line = position.position.line + 1;
         var column = position.position.character + 1;
-        if (!FileStore.isJavaFile(uri)) return Optional.empty();
-        var file = Paths.get(uri);
+        if (!FileStore.isJavaFile(uri)) {
+            return Optional.empty();
+        }
+        var file = FileStore.getPath(uri);
         var list = new HoverProvider(compiler()).hover(file, line, column);
         if (list == HoverProvider.NOT_SUPPORTED) {
             return Optional.empty();
@@ -289,18 +365,24 @@ class JavaLanguageServer extends LanguageServer {
 
     @Override
     public Optional<SignatureHelp> signatureHelp(TextDocumentPositionParams params) {
-        if (!FileStore.isJavaFile(params.textDocument.uri)) return Optional.empty();
-        var file = Paths.get(params.textDocument.uri);
+        if (!FileStore.isJavaFile(params.textDocument.uri)) {
+            return Optional.empty();
+        }
+        var file = FileStore.getPath(params.textDocument.uri);
         var line = params.position.line + 1;
         var column = params.position.character + 1;
         var help = new SignatureProvider(compiler()).signatureHelp(file, line, column);
-        if (help == SignatureProvider.NOT_SUPPORTED) return Optional.empty();
+        if (help == SignatureProvider.NOT_SUPPORTED) {
+            return Optional.empty();
+        }
         return Optional.of(help);
     }
 
     @Override
     public Optional<List<Location>> gotoDefinition(TextDocumentPositionParams position) {
-        if (!FileStore.isJavaFile(position.textDocument.uri)) return Optional.empty();
+        if (!FileStore.isJavaFile(position.textDocument.uri)) {
+            return Optional.empty();
+        }
         var file = FileStore.getPath(position.textDocument.uri);
         var line = position.position.line + 1;
         var column = position.position.character + 1;
@@ -313,8 +395,10 @@ class JavaLanguageServer extends LanguageServer {
 
     @Override
     public Optional<List<Location>> findReferences(ReferenceParams position) {
-        if (!FileStore.isJavaFile(position.textDocument.uri)) return Optional.empty();
-        var file = Paths.get(position.textDocument.uri);
+        if (!FileStore.isJavaFile(position.textDocument.uri)) {
+            return Optional.empty();
+        }
+        var file = FileStore.getPath(position.textDocument.uri);
         var line = position.position.line + 1;
         var column = position.position.character + 1;
         var found = new ReferenceProvider(compiler(), file, line, column).find();
@@ -326,15 +410,19 @@ class JavaLanguageServer extends LanguageServer {
 
     @Override
     public List<SymbolInformation> documentSymbol(DocumentSymbolParams params) {
-        if (!FileStore.isJavaFile(params.textDocument.uri)) return List.of();
-        var file = Paths.get(params.textDocument.uri);
+        if (!FileStore.isJavaFile(params.textDocument.uri)) {
+            return List.of();
+        }
+        var file = FileStore.getPath(params.textDocument.uri);
         return new SymbolProvider(compiler()).documentSymbols(file);
     }
 
     @Override
     public List<CodeLens> codeLens(CodeLensParams params) {
-        if (!FileStore.isJavaFile(params.textDocument.uri)) return List.of();
-        var file = Paths.get(params.textDocument.uri);
+        if (!FileStore.isJavaFile(params.textDocument.uri)) {
+            return List.of();
+        }
+        var file = FileStore.getPath(params.textDocument.uri);
         var task = compiler().parse(file);
         return CodeLensProvider.find(task);
     }
@@ -347,7 +435,7 @@ class JavaLanguageServer extends LanguageServer {
     @Override
     public List<TextEdit> formatting(DocumentFormattingParams params) {
         var edits = new ArrayList<TextEdit>();
-        var file = Paths.get(params.textDocument.uri);
+        var file = FileStore.getPath(params.textDocument.uri);
         var fixImports = new AutoFixImports(file).rewrite(compiler()).get(file);
         Collections.addAll(edits, fixImports);
         var addOverrides = new AutoAddOverrides(file).rewrite(compiler()).get(file);
@@ -357,16 +445,20 @@ class JavaLanguageServer extends LanguageServer {
 
     @Override
     public List<FoldingRange> foldingRange(FoldingRangeParams params) {
-        if (!FileStore.isJavaFile(params.textDocument.uri)) return List.of();
-        var file = Paths.get(params.textDocument.uri);
+        if (!FileStore.isJavaFile(params.textDocument.uri)) {
+            return List.of();
+        }
+        var file = FileStore.getPath(params.textDocument.uri);
         return new FoldProvider(compiler()).foldingRanges(file);
     }
 
     @Override
     public Optional<RenameResponse> prepareRename(TextDocumentPositionParams params) {
-        if (!FileStore.isJavaFile(params.textDocument.uri)) return Optional.empty();
+        if (!FileStore.isJavaFile(params.textDocument.uri)) {
+            return Optional.empty();
+        }
         LOG.info("Try to rename...");
-        var file = Paths.get(params.textDocument.uri);
+        var file = FileStore.getPath(params.textDocument.uri);
         try (var task = compiler().compile(file)) {
             var lines = task.root().getLineMap();
             var cursor = lines.getPosition(params.position.line + 1, params.position.character + 1);
@@ -410,7 +502,9 @@ class JavaLanguageServer extends LanguageServer {
     }
 
     private boolean canFindSource(Element rename) {
-        if (rename == null) return false;
+        if (rename == null) {
+            return false;
+        }
         if (rename instanceof TypeElement) {
             var type = (TypeElement) rename;
             var name = type.getQualifiedName().toString();
@@ -431,12 +525,14 @@ class JavaLanguageServer extends LanguageServer {
     }
 
     private Rewrite createRewrite(RenameParams params) {
-        var file = Paths.get(params.textDocument.uri);
+        var file = FileStore.getPath(params.textDocument.uri);
         try (var task = compiler().compile(file)) {
             var lines = task.root().getLineMap();
             var position = lines.getPosition(params.position.line + 1, params.position.character + 1);
             var path = new FindNameAt(task).scan(task.root(), position);
-            if (path == null) return Rewrite.NOT_SUPPORTED;
+            if (path == null) {
+                return Rewrite.NOT_SUPPORTED;
+            }
             var el = Trees.instance(task.task).getElement(path);
             switch (el.getKind()) {
                 case METHOD:
@@ -475,7 +571,7 @@ class JavaLanguageServer extends LanguageServer {
     private RenameVariable renameVariable(CompileTask task, VariableElement variable, String newName) {
         var trees = Trees.instance(task.task);
         var path = trees.getPath(variable);
-        var file = Paths.get(path.getCompilationUnit().getSourceFile().toUri());
+        var file = FileStore.getPath(path.getCompilationUnit().getSourceFile().toUri());
         var position = trees.getSourcePositions().getStartPosition(path.getCompilationUnit(), path.getLeaf());
         return new RenameVariable(file, (int) position, newName);
     }
@@ -486,15 +582,17 @@ class JavaLanguageServer extends LanguageServer {
     @Override
     public void didOpenTextDocument(DidOpenTextDocumentParams params) {
         FileStore.open(params);
-        if (!FileStore.isJavaFile(params.textDocument.uri)) return;
-        lastEdited = Paths.get(params.textDocument.uri);
+        if (!FileStore.isJavaFile(params.textDocument.uri)) {
+            return;
+        }
+        lastEdited = FileStore.getPath(params.textDocument.uri);
         uncheckedChanges = true;
     }
 
     @Override
     public void didChangeTextDocument(DidChangeTextDocumentParams params) {
         FileStore.change(params);
-        lastEdited = Paths.get(params.textDocument.uri);
+        lastEdited = FileStore.getPath(params.textDocument.uri);
         uncheckedChanges = true;
     }
 

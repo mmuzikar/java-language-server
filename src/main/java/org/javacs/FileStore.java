@@ -7,7 +7,11 @@ import java.nio.file.attribute.*;
 import java.time.Instant;
 import java.util.*;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import javax.lang.model.element.TypeElement;
+
 import org.javacs.lsp.DidChangeTextDocumentParams;
 import org.javacs.lsp.DidCloseTextDocumentParams;
 import org.javacs.lsp.DidOpenTextDocumentParams;
@@ -20,9 +24,16 @@ public class FileStore {
 
     private static final Map<Path, VersionedContent> activeDocuments = new HashMap<>();
 
-    /** javaSources[file] is the javaSources time of a .java source file. */
+    /**
+     * javaSources[file] is the javaSources time of a .java source file.
+     */
     // TODO organize by package name for speed of list(...)
     private static final TreeMap<Path, Info> javaSources = new TreeMap<>();
+
+    private static final Map<String, FileSystem> openJars = new HashMap<>();
+
+    private static final Instant AT_START = Instant.now();
+    private static final Pattern CLASS_IN_JAR_REGEX = Pattern.compile("([^!])+!(\\w+)");
 
     private static class Info {
         final Instant modified;
@@ -156,9 +167,13 @@ public class FileStore {
         for (var dir = file.getParent(); dir != null; dir = dir.getParent()) {
             // Try to find a sibling with a package declaration
             for (var sibling : javaSourcesIn(dir)) {
-                if (sibling.equals(file)) continue;
+                if (sibling.equals(file)) {
+                    continue;
+                }
                 var packageName = packageName(sibling);
-                if (packageName.isBlank()) continue;
+                if (packageName.isBlank()) {
+                    continue;
+                }
                 var relativePath = dir.relativize(file.getParent());
                 var relativePackage = relativePath.toString().replace(File.separatorChar, '.');
                 if (!relativePackage.isEmpty()) {
@@ -174,7 +189,9 @@ public class FileStore {
         var tail = javaSources.tailMap(dir, false);
         var list = new ArrayList<Path>();
         for (var file : tail.keySet()) {
-            if (!file.startsWith(dir)) break;
+            if (!file.startsWith(dir)) {
+                break;
+            }
             list.add(file);
         }
         return list;
@@ -194,7 +211,12 @@ public class FileStore {
 
     private static void readInfoFromDisk(Path file) {
         try {
-            var time = Files.getLastModifiedTime(file).toInstant();
+            Instant time;
+            if (file.toString().contains(".jar!")) {
+                time = AT_START;
+            } else {
+                time = Files.getLastModifiedTime(file).toInstant();
+            }
             var packageName = StringSearch.packageName(file);
             javaSources.put(file, new Info(time, packageName));
         } catch (NoSuchFileException e) {
@@ -206,7 +228,9 @@ public class FileStore {
     }
 
     static void open(DidOpenTextDocumentParams params) {
-        if (!isJavaFile(params.textDocument.uri)) return;
+        if (!isJavaFile(params.textDocument.uri)) {
+            return;
+        }
         var document = params.textDocument;
         final var file = getPath(document.uri);
         activeDocuments.put(file, new VersionedContent(document.text, document.version));
@@ -214,14 +238,32 @@ public class FileStore {
 
     public static Path getPath(URI uri) {
         if (uri.getScheme().equals("jar")) {
-            uri = URI.create(uri.getSchemeSpecificPart());
+            String classPath = uri.getSchemeSpecificPart();
+            int sep = classPath.indexOf('!');
+            if (sep != -1) {
+                String jarPath = classPath.substring(0, sep);
+                FileSystem fs;
+                if (openJars.containsKey(jarPath)) {
+                    fs = openJars.get(jarPath);
+                } else {
+                    try {
+                        fs = FileSystems.newFileSystem(uri, Map.of());
+                        fs = openJars.put(jarPath, fs);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+                return fs.getPath(classPath.substring(sep + 1));
+            }
         }
         var file = Paths.get(uri);
         return file;
     }
 
     static void change(DidChangeTextDocumentParams params) {
-        if (!isJavaFile(params.textDocument.uri)) return;
+        if (!isJavaFile(params.textDocument.uri)) {
+            return;
+        }
         var document = params.textDocument;
         var file = getPath(document.uri);
         var existing = activeDocuments.get(file);
@@ -231,14 +273,19 @@ public class FileStore {
         }
         var newText = existing.content;
         for (var change : params.contentChanges) {
-            if (change.range == null) newText = change.text;
-            else newText = patch(newText, change);
+            if (change.range == null) {
+                newText = change.text;
+            } else {
+                newText = patch(newText, change);
+            }
         }
         activeDocuments.put(file, new VersionedContent(newText, document.version));
     }
 
     static void close(DidCloseTextDocumentParams params) {
-        if (!isJavaFile(params.textDocument.uri)) return;
+        if (!isJavaFile(params.textDocument.uri)) {
+            return;
+        }
         var file = getPath(params.textDocument.uri);
         activeDocuments.remove(file);
     }
@@ -302,7 +349,9 @@ public class FileStore {
         return bufferedReader(file);
     }
 
-    /** Convert from line/column (1-based) to offset (0-based) */
+    /**
+     * Convert from line/column (1-based) to offset (0-based)
+     */
     static int offset(String contents, int line, int column) {
         line--;
         column--;
@@ -346,7 +395,7 @@ public class FileStore {
                 int lines = change.range.end.line - change.range.start.line;
                 int chars = change.range.end.character;
                 for (int lineSkip = 0; lineSkip < lines; lineSkip++) {
-                    reader.readLine();                    
+                    reader.readLine();
                 }
                 reader.skip(chars);
             }
@@ -355,8 +404,11 @@ public class FileStore {
             while (true) {
                 int next = reader.read();
 
-                if (next == -1) return writer.toString();
-                else writer.write(next);
+                if (next == -1) {
+                    return writer.toString();
+                } else {
+                    writer.write(next);
+                }
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
